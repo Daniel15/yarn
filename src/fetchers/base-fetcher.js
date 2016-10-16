@@ -1,11 +1,10 @@
 /* @flow */
 /* eslint no-unused-vars: 0 */
 
-import type {Manifest, PackageRemote, FetchedMetadata, FetchedOverride} from '../types.js';
+import type {PackageRemote, FetchedMetadata, FetchedOverride} from '../types.js';
 import type {RegistryNames} from '../registries/index.js';
 import type Config from '../config.js';
 import * as constants from '../constants.js';
-import * as util from '../util/misc.js';
 import * as fs from '../util/fs.js';
 
 const path = require('path');
@@ -28,7 +27,7 @@ export default class BaseFetcher {
   dest: string;
 
   getResolvedFromCached(hash: string): Promise<?string> {
-    // fetcher subclasses may use this to perform actions such as copying over a cached tarbal to the offline
+    // fetcher subclasses may use this to perform actions such as copying over a cached tarball to the offline
     // mirror etc
     return Promise.resolve();
   }

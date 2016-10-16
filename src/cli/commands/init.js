@@ -4,15 +4,15 @@ import type {Reporter} from '../../reporters/index.js';
 import type Config from '../../config.js';
 import {stringifyPerson} from '../../util/normalize-manifest/util.js';
 import {registryNames} from '../../registries/index.js';
-import Lockfile from '../../lockfile/wrapper.js';
-import {Install} from './install.js';
 import * as child from '../../util/child.js';
 import * as fs from '../../util/fs.js';
 
 const objectPath = require('object-path');
 const path = require('path');
 
-export const noArguments = true;
+export function setFlags(commander: Object) {
+  commander.option('-y, --yes', 'use default options');
+}
 
 export async function run(
   config: Config,
@@ -20,9 +20,7 @@ export async function run(
   flags: Object,
   args: Array<string>,
 ): Promise<void> {
-  const lockfile = new Lockfile();
-  const install = new Install(flags, config, reporter, lockfile);
-  const manifests = await install.getRootManifests();
+  const manifests = await config.getRootManifests();
 
   let gitUrl;
   const author = {
@@ -84,6 +82,7 @@ export async function run(
   // get answers
   const pkg = {};
   for (const entry of keys) {
+    const {yes} = flags;
     const {key: manifestKey} = entry;
     let {question, default: def} = entry;
 
@@ -100,7 +99,14 @@ export async function run(
       question += ` (${def})`;
     }
 
-    const answer = (await reporter.question(question)) || def;
+    let answer;
+
+    if (yes) {
+      answer = def;
+    } else {
+      answer = (await reporter.question(question)) || def;
+    }
+
     if (answer) {
       objectPath.set(pkg, manifestKey, answer);
     }
@@ -127,5 +133,5 @@ export async function run(
     reporter.success(`Saved ${path.basename(targetManifest.loc)}`);
   }
 
-  await install.saveRootManifests(manifests);
+  await config.saveRootManifests(manifests);
 }

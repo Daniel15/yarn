@@ -1,24 +1,25 @@
 /* @flow */
 
-import type {RegistryNames} from './registries/index.js';
+import type {RegistryNames, ConfigRegistries} from './registries/index.js';
 import type {Reporter} from './reporters/index.js';
-import type Registry from './registries/base-registry.js';
 import type {Manifest, PackageRemote} from './types.js';
 import normalizeManifest from './util/normalize-manifest/index.js';
+import {MessageError} from './errors.js';
 import * as fs from './util/fs.js';
 import * as constants from './constants.js';
 import ConstraintResolver from './package-constraint-resolver.js';
 import RequestManager from './util/request-manager.js';
-import {registries} from './registries/index.js';
+import {registries, registryNames} from './registries/index.js';
 import map from './util/map.js';
 
+const detectIndent = require('detect-indent');
 const invariant = require('invariant');
 const path = require('path');
 const url = require('url');
 
-type ConfigOptions = {
+export type ConfigOptions = {
   cwd?: ?string,
-  packagesRoot?: ?string,
+  cacheFolder?: ?string,
   tempFolder?: ?string,
   modulesFolder?: ?string,
   globalFolder?: ?string,
@@ -26,7 +27,9 @@ type ConfigOptions = {
   offline?: boolean,
   preferOffline?: boolean,
   captureHar?: boolean,
+  ignorePlatform?: boolean,
   ignoreEngines?: boolean,
+  cafile?: ?string,
 
   // Loosely compare semver for invalid cases like "0.01.0"
   looseSemver?: ?boolean,
@@ -39,9 +42,22 @@ type PackageMetadata = {
   package: Manifest
 };
 
-export type ConfigRegistries = {
-  [name: RegistryNames]: Registry
+type RootManifests = {
+  [registryName: RegistryNames]: {
+    loc: string,
+    indent: ?string,
+    object: Object,
+    exists: boolean,
+  }
 };
+
+function sortObject(object: Object): Object {
+  const sortedObject = {};
+  Object.keys(object).sort().forEach((item) => {
+    sortedObject[item] = object[item];
+  });
+  return sortedObject;
+}
 
 export default class Config {
   constructor(reporter: Reporter) {
@@ -55,6 +71,7 @@ export default class Config {
   looseSemver: boolean;
   offline: boolean;
   preferOffline: boolean;
+  ignorePlatform: boolean;
 
   //
   linkedModules: Array<string>;
@@ -78,7 +95,7 @@ export default class Config {
   modulesFolder: ?string;
 
   //
-  packagesRoot: string;
+  cacheFolder: string;
 
   //
   tempFolder: string;
@@ -109,7 +126,7 @@ export default class Config {
       return cached;
     }
 
-    return this.cache[key] = factory().catch((err) => {
+    return this.cache[key] = factory().catch((err: mixed) => {
       this.cache[key] = null;
       throw err;
     });
@@ -139,7 +156,7 @@ export default class Config {
     this._init(opts);
 
     await fs.mkdirp(this.globalFolder);
-    await fs.mkdirp(this.packagesRoot);
+    await fs.mkdirp(this.cacheFolder);
     await fs.mkdirp(this.tempFolder);
 
     await fs.mkdirp(this.linkFolder);
@@ -161,6 +178,8 @@ export default class Config {
       userAgent: String(this.getOption('user-agent')),
       httpProxy: String(this.getOption('proxy') || ''),
       httpsProxy: String(this.getOption('https-proxy') || ''),
+      strictSSL: Boolean(this.getOption('strict-ssl')),
+      cafile: String(opts.cafile || this.getOption('cafile') || ''),
     });
   }
 
@@ -178,10 +197,11 @@ export default class Config {
     this.preferOffline = !!opts.preferOffline;
     this.modulesFolder = opts.modulesFolder;
     this.globalFolder = opts.globalFolder || constants.GLOBAL_MODULE_DIRECTORY;
-    this.packagesRoot = opts.packagesRoot || constants.MODULE_CACHE_DIRECTORY;
+    this.cacheFolder = opts.cacheFolder || constants.MODULE_CACHE_DIRECTORY;
     this.linkFolder = opts.linkFolder || constants.LINK_REGISTRY_DIRECTORY;
-    this.tempFolder = opts.tempFolder || path.join(this.packagesRoot, '.tmp');
+    this.tempFolder = opts.tempFolder || path.join(this.cacheFolder, '.tmp');
     this.offline = !!opts.offline;
+    this.ignorePlatform = !!opts.ignorePlatform;
 
     this.requestManager.setOptions({
       offline: !!opts.offline && !opts.preferOffline,
@@ -204,7 +224,7 @@ export default class Config {
     registry: RegistryNames,
     location: ?string
   }, ignoreLocation?: ?boolean): string {
-    invariant(this.packagesRoot, 'No package root');
+    invariant(this.cacheFolder, 'No package root');
     invariant(pkg, 'Undefined package');
     invariant(pkg.name, 'No name field in package');
     invariant(pkg.uid, 'No uid field in package');
@@ -219,7 +239,7 @@ export default class Config {
       uid = pkg.version || uid;
     }
 
-    return path.join(this.packagesRoot, `${name}-${uid}`);
+    return path.join(this.cacheFolder, `${name}-${uid}`);
   }
 
   /**
@@ -327,7 +347,7 @@ export default class Config {
         }
       }
 
-      throw new Error(`Couldn't find a package.json (or bower.json) file in ${dir}`);
+      throw new MessageError(`Couldn't find a package.json (or bower.json) file in ${dir}`);
     });
   }
 
@@ -368,5 +388,51 @@ export default class Config {
       registryName = ref.registry;
     }
     return this.registries[registryName].folder;
+  }
+
+  /**
+   * Get root manifests.
+   */
+
+  async getRootManifests(): Promise<RootManifests> {
+    const manifests: RootManifests = {};
+    for (const registryName of registryNames) {
+      const registry = registries[registryName];
+      const jsonLoc = path.join(this.cwd, registry.filename);
+
+      let object = {};
+      let exists = false;
+      let indent;
+      if (await fs.exists(jsonLoc)) {
+        exists = true;
+
+        const info = await fs.readJsonAndFile(jsonLoc);
+        object = info.object;
+        indent = detectIndent(info.content).indent || undefined;
+      }
+      manifests[registryName] = {loc: jsonLoc, object, exists, indent};
+    }
+    return manifests;
+  }
+
+  /**
+   * Save root manifests.
+   */
+
+  async saveRootManifests(manifests: RootManifests): Promise<void> {
+    for (const registryName of registryNames) {
+      const {loc, object, exists, indent} = manifests[registryName];
+      if (!exists && !Object.keys(object).length) {
+        continue;
+      }
+
+      for (const field of constants.DEPENDENCY_TYPES) {
+        if (object[field]) {
+          object[field] = sortObject(object[field]);
+        }
+      }
+
+      await fs.writeFile(loc, JSON.stringify(object, null, indent || constants.DEFAULT_INDENT) + '\n');
+    }
   }
 }

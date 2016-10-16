@@ -25,21 +25,19 @@ export const CHILD_CONCURRENCY = 5;
 
 export const REQUIRED_PACKAGE_KEYS = ['name', 'version', '_uid'];
 
-export function getModuleCacheDirectory(): string {
+function getDirectory(type: string): string {
   // use %LOCALAPPDATA%/Yarn on Windows
   if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
-    return path.join(process.env.LOCALAPPDATA, 'Yarn');
+    return path.join(process.env.LOCALAPPDATA, 'Yarn', type);
   }
 
   // otherwise use ~/.yarn
-  return path.join(userHome, '.yarn-cache');
+  return path.join(userHome, `.yarn-${type}`);
 }
 
-// the kpm and fbkpm names here are legacy names for yarn here for compatibility
-
-export const MODULE_CACHE_DIRECTORY = getModuleCacheDirectory();
-export const LINK_REGISTRY_DIRECTORY = `${MODULE_CACHE_DIRECTORY}/.link`;
-export const GLOBAL_MODULE_DIRECTORY = `${MODULE_CACHE_DIRECTORY}/.global`;
+export const MODULE_CACHE_DIRECTORY = getDirectory('cache');
+export const LINK_REGISTRY_DIRECTORY = getDirectory('config/link');
+export const GLOBAL_MODULE_DIRECTORY = getDirectory('config/global');
 
 export const INTEGRITY_FILENAME = '.yarn-integrity';
 export const LOCKFILE_FILENAME = 'yarn.lock';
@@ -47,6 +45,7 @@ export const METADATA_FILENAME = '.yarn-metadata.json';
 export const TARBALL_FILENAME = '.yarn-tarball.tgz';
 export const CLEAN_FILENAME = '.yarnclean';
 
+export const DEFAULT_INDENT = '  ';
 export const SINGLE_INSTANCE_PORT = 31997;
 export const SINGLE_INSTANCE_FILENAME = '.yarn-single-instance';
 

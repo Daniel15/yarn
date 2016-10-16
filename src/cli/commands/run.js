@@ -36,7 +36,7 @@ export async function run(
     if (await fs.exists(binFolder)) {
       for (const name of await fs.readdir(binFolder)) {
         binCommands.push(name);
-        scripts[name] = `${path.join(binFolder, name)}`;
+        scripts[name] = `"${path.join(binFolder, name)}"`;
       }
     }
   }

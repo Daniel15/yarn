@@ -6,7 +6,6 @@ import type {Manifest, DependencyRequestPatterns} from '../../types.js';
 import type Config from '../../config.js';
 import type {RegistryNames} from '../../registries/index.js';
 import normalizeManifest from '../../util/normalize-manifest/index.js';
-import {stringify} from '../../util/misc.js';
 import {registryNames} from '../../registries/index.js';
 import {MessageError} from '../../errors.js';
 import Lockfile from '../../lockfile/wrapper.js';
@@ -23,7 +22,7 @@ import {registries} from '../../registries/index.js';
 import {clean} from './clean.js';
 import * as constants from '../../constants.js';
 import * as fs from '../../util/fs.js';
-import * as util from '../../util/misc.js';
+import * as crypto from '../../util/crypto.js';
 import map from '../../util/map.js';
 
 const invariant = require('invariant');
@@ -42,14 +41,6 @@ export type InstallCwdRequest = [
   Object
 ];
 
-type RootManifests = {
-  [registryName: RegistryNames]: {
-    loc: string,
-    object: Object,
-    exists: boolean,
-  }
-};
-
 type IntegrityMatch = {
   actual: string,
   expected: string,
@@ -59,6 +50,7 @@ type IntegrityMatch = {
 
 type Flags = {
   // install
+  ignorePlatform: boolean,
   ignoreEngines: boolean,
   ignoreScripts: boolean,
   ignoreOptional: boolean,
@@ -82,6 +74,7 @@ function normalizeFlags(config: Config, rawFlags: Object): Flags {
   const flags = {
     // install
     har: !!rawFlags.har,
+    ignorePlatform: !!rawFlags.ignorePlatform,
     ignoreEngines: !!rawFlags.ignoreEngines,
     ignoreScripts: !!rawFlags.ignoreScripts,
     ignoreOptional: !!rawFlags.ignoreOptional,
@@ -104,6 +97,10 @@ function normalizeFlags(config: Config, rawFlags: Object): Flags {
     flags.ignoreScripts = true;
   }
 
+  if (config.getOption('ignore-platform')) {
+    flags.ignorePlatform = true;
+  }
+
   if (config.getOption('ignore-engines')) {
     flags.ignoreEngines = true;
   }
@@ -123,14 +120,6 @@ function normalizeFlags(config: Config, rawFlags: Object): Flags {
   return flags;
 }
 
-const sortObject = (object) => {
-  const sortedObject = {};
-  Object.keys(object).sort().forEach((item) => {
-    sortedObject[item] = object[item];
-  });
-  return sortedObject;
-};
-
 export class Install {
   constructor(
     flags: Object,
@@ -148,7 +137,7 @@ export class Install {
 
     this.resolver = new PackageResolver(config, lockfile);
     this.fetcher = new PackageFetcher(config, this.resolver);
-    this.compatibility = new PackageCompatibility(config, this.resolver);
+    this.compatibility = new PackageCompatibility(config, this.resolver, this.flags.ignoreEngines);
     this.linker = new PackageLinker(config, this.resolver, this.flags.ignoreOptional);
     this.scripts = new PackageInstallScripts(config, this.resolver, this.flags.force);
   }
@@ -404,7 +393,7 @@ export class Install {
       if (infos.length === 1) {
         // single version of this package
         // take out a single pattern as multiple patterns may have resolved to this package
-        patterns.push(this.resolver.patternsByPackage[name][0]);
+        flattenedPatterns.push(this.resolver.patternsByPackage[name][0]);
         continue;
       }
 
@@ -439,7 +428,7 @@ export class Install {
 
     // save resolutions to their appropriate root manifest
     if (Object.keys(this.resolutions).length) {
-      const jsons = await this.getRootManifests();
+      const manifests = await this.config.getRootManifests();
 
       for (const name in this.resolutions) {
         const version = this.resolutions[name];
@@ -461,57 +450,15 @@ export class Install {
         const ref = manifest._reference;
         invariant(ref, 'expected reference');
 
-        const object = jsons[ref.registry].object;
+        const object = manifests[ref.registry].object;
         object.resolutions = object.resolutions || {};
         object.resolutions[name] = version;
       }
 
-      await this.saveRootManifests(jsons);
+      await this.config.saveRootManifests(manifests);
     }
 
     return flattenedPatterns;
-  }
-
-  /**
-   * Get root manifests.
-   */
-
-  async getRootManifests(): Promise<RootManifests> {
-    const manifests: RootManifests = {};
-    for (const registryName of registryNames) {
-      const registry = registries[registryName];
-      const jsonLoc = path.join(this.config.cwd, registry.filename);
-
-      let object = {};
-      let exists = false;
-      if (await fs.exists(jsonLoc)) {
-        exists = true;
-        object = await fs.readJson(jsonLoc);
-      }
-      manifests[registryName] = {loc: jsonLoc, object, exists};
-    }
-    return manifests;
-  }
-
-  /**
-   * Save root manifests.
-   */
-
-  async saveRootManifests(manifests: RootManifests): Promise<void> {
-    for (const registryName of registryNames) {
-      const {loc, object, exists} = manifests[registryName];
-      if (!exists && !Object.keys(object).length) {
-        continue;
-      }
-
-      for (const field of constants.DEPENDENCY_TYPES) {
-        if (object[field]) {
-          object[field] = sortObject(object[field]);
-        }
-      }
-
-      await fs.writeFile(loc, stringify(object) + '\n');
-    }
   }
 
   /**
@@ -663,16 +610,17 @@ export class Install {
       opts.push(`mirror:${mirror}`);
     }
 
-    return util.hash(opts.join('-'));
+    return crypto.hash(opts.join('-'), 'sha256');
   }
 }
 
 export function _setFlags(commander: Object) {
   commander.option('--har', 'save HAR output of network traffic');
+  commander.option('--ignore-platform', 'ignore platform checks');
   commander.option('--ignore-engines', 'ignore engines check');
   commander.option('--ignore-scripts', '');
   commander.option('--ignore-optional', '');
-  commander.option('--force', '');
+  commander.option('--force', 'ignore all caches');
   commander.option('--flat', 'only allow one version of a package');
   commander.option('--prod, --production', '');
   commander.option('--no-lockfile', "don't read or generate a lockfile");
@@ -729,9 +677,15 @@ export async function run(
     throw new MessageError(reporter.lang('installCommandRenamed', `yarn ${command} ${exampleArgs.join(' ')}`));
   }
 
+  await executeLifecycleScript(config, 'preinstall');
+
   const install = new Install(flags, config, reporter, lockfile);
   await install.init();
 
   // npm behaviour, seems kinda funky but yay compatibility
-  await executeLifecycleScript(config, 'prepublish');
+  await executeLifecycleScript(config, 'install');
+  await executeLifecycleScript(config, 'postinstall');
+  if (!flags.production) {
+    await executeLifecycleScript(config, 'prepublish');
+  }
 }

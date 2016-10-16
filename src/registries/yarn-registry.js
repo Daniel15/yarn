@@ -1,7 +1,7 @@
 /* @flow */
 
 import type RequestManager from '../util/request-manager.js';
-import type {ConfigRegistries} from '../config.js';
+import type {ConfigRegistries} from './index.js';
 import {YARN_REGISTRY} from '../constants.js';
 import NpmRegistry from './npm-registry.js';
 import stringify from '../lockfile/stringify.js';
@@ -11,7 +11,7 @@ import * as fs from '../util/fs.js';
 const userHome = require('user-home');
 const defaults = require('defaults');
 const path = require('path');
-const pkg = require('../../package.json');
+const pkg: { version: string } = require('../../package.json');
 
 export const DEFAULTS = {
   'version-tag-prefix': 'v',
@@ -24,8 +24,9 @@ export const DEFAULTS = {
 
   'save-prefix': '^',
   'ignore-scripts': false,
-  'ignore-optional': true,
+  'ignore-optional': false,
   registry: YARN_REGISTRY,
+  'strict-ssl': true,
   'user-agent': [
     `yarn/${pkg.version}`,
     'npm/?',
@@ -56,7 +57,23 @@ export default class YarnRegistry extends NpmRegistry {
   homeConfig: Object;
 
   getOption(key: string): mixed {
-    return this.config[key] || this.registries.npm.getOption(npmMap[key] || key);
+    let val = this.config[key];
+
+    // if this isn't set in a yarn config, then use npm
+    if (typeof val === 'undefined') {
+      val = this.registries.npm.getOption(npmMap[key]);
+    }
+
+    if (typeof val === 'undefined') {
+      val = this.registries.npm.getOption(key);
+    }
+
+    // if this isn't set in a yarn config or npm config, then use the default (or undefined)
+    if (typeof val === 'undefined') {
+      val = DEFAULTS[key];
+    }
+    
+    return val;
   }
 
   async loadConfig(): Promise<void> {

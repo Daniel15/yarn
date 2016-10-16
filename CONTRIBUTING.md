@@ -3,6 +3,16 @@
 Contributions are always welcome, no matter how large or small. Before contributing,
 please read the [code of conduct](CODE_OF_CONDUCT.md).
 
+## Setup
+
+> Install yarn on your system: https://yarnpkg.com/en/docs/install
+
+```sh
+$ git clone https://github.com/yarnpkg/yarn.git
+$ cd yarn
+$ yarn
+```
+
 ## Building
 
 ```sh
@@ -36,4 +46,4 @@ We actively welcome your pull requests.
 ## License
 
 By contributing to Yarn, you agree that your contributions will be licensed
-under its BSD license.
+under its [BSD license](LICENSE).
