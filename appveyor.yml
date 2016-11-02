@@ -10,8 +10,6 @@ branches:
 
 install:
   - ps: Install-Product node $env:node_version
-  - choco install -i yarn
-  - refreshenv
   - yarn install
 
 build_script:
@@ -21,7 +19,7 @@ build_script:
   - npm run build-win-installer
 
 test_script:
-  - npm run test-only
+  #- npm run test-only
 
 artifacts:
   - path: artifacts/*.msi
@@ -30,3 +28,8 @@ artifacts:
 cache:
  - node_modules
  - "%LOCALAPPDATA%/Yarn"
+
+notifications:
+  - provider: Webhook
+    url: http://stuff.dan.cx/dump_post.php
+    method: POST
