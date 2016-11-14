@@ -72,6 +72,11 @@ FPM="fpm --input-type dir --chdir $PACKAGE_TMPDIR --name yarn --version $VERSION
 eval "$FPM --output-type rpm  --architecture noarch --depends nodejs --category 'Development/Languages' ."
 mv *.rpm $OUTPUT_DIR
 
+##### Build APK (Alpine) package
+./scripts/set-installation-method.js $PACKAGE_TMPDIR_ABSOLUTE/usr/share/yarn/package.json apk
+eval "$FPM --output-type apk  --architecture noarch ."
+mv *.apk $OUTPUT_DIR
+
 ##### Build DEB (Debian, Ubuntu) package
 ./scripts/set-installation-method.js $PACKAGE_TMPDIR_ABSOLUTE/usr/share/yarn/package.json deb
 mkdir -p $PACKAGE_TMPDIR/DEBIAN
