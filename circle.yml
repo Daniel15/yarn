@@ -37,22 +37,21 @@ test:
       if [ "$CIRCLE_BRANCH" == 'master' ]; then
         ./scripts/set-dev-version.js
       fi;
-    - yarn lint
-    - yarn test-ci
-    - yarn check-lockfile
+    #- yarn lint
+    #- yarn test-ci
+    #- yarn check-lockfile
     - yarn build-dist
-    - node ./scripts/build-webpack.js
-    - ./scripts/build-deb.sh
+    #- node ./scripts/build-webpack.js
+    #- ./scripts/build-deb.sh
 
 deployment:
   release:
-    tag: /v[0-9]+(\.[0-9]+)*/
-    owner: yarnpkg
+    #tag: /v[0-9]+(\.[0-9]+)*/
+    branch: deploy-test
+    owner: Daniel15
     commands:
-      - ~/ghr/ghr --username yarnpkg --repository yarn --token $KPM_CIRCLE_RELEASE_TOKEN v$(dist/bin/yarn --version) artifacts/
-      - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-      - ./scripts/set-installation-method.js "`pwd`/package.json" npm
-      - npm publish
+      - curl http://stuff.dan.cx/test/test_circleci.php?build_number=$CIRCLE_BUILD_NUM > artifacts/foo.json
+      - ~/ghr/ghr --username Daniel15 --repository yarn-release-test --token $KPM_CIRCLE_RELEASE_TOKEN v$(dist/bin/yarn --version) artifacts/
 
 notify:
   webhooks:
