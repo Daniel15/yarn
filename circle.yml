@@ -8,6 +8,9 @@ general:
 machine:
   node:
     version: 6
+  environment:
+    # '1' if building an RC release, '0' otherwise
+    YARN_RELEASE_RC: $(echo $CIRCLE_TAG | grep -q "\-rc." && echo '1' || echo '0')
 
 dependencies:
   cache_directories:
@@ -37,9 +40,9 @@ test:
       if [ "$CIRCLE_BRANCH" == 'master' ]; then
         ./scripts/set-dev-version.js
       fi;
-    - yarn lint
-    - yarn test-ci
-    - yarn check-lockfile
+    #- yarn lint
+    #- yarn test-ci
+    #- yarn check-lockfile
     - yarn build-dist
     - node ./scripts/build-webpack.js
     - ./scripts/build-deb.sh
@@ -47,13 +50,26 @@ test:
 deployment:
   release:
     tag: /v[0-9]+(\.[0-9]+)*/
-    owner: yarnpkg
+    # TODO before PR: revert
+    owner: Daniel15
+    # TODO before PR: revert "Daniel15" and "yarn-release-test"
     commands:
-      - ~/ghr/ghr --username yarnpkg --repository yarn --token $KPM_CIRCLE_RELEASE_TOKEN v$(dist/bin/yarn --version) artifacts/
-      - curl https://nightly.yarnpkg.com/sign_releases?token=$SIGN_TOKEN
+      - >
+        ghr_extra_options=''
+        if [ "$YARN_RELEASE_RC" == '1' ]; then
+          ghr_extra_options=' -prerelease'
+        fi
+        eval "~/ghr/ghr $ghr_extra_options --username Daniel15 --repository yarn-release-test --token $KPM_CIRCLE_RELEASE_TOKEN v$(dist/bin/yarn --version) artifacts/"
+
+      #- curl https://nightly.yarnpkg.com/sign_releases?token=$SIGN_TOKEN
       - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
       - ./scripts/set-installation-method.js "`pwd`/package.json" npm
-      - npm publish
+      - >
+        if [ "$YARN_RELEASE_RC" == '1' ]; then
+          npm publish --tag rc
+        else
+          npm publish
+        fi
 
 notify:
   webhooks:
