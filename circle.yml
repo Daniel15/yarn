@@ -17,44 +17,13 @@ dependencies:
   override:
     - which node
 
-    # install dependencies
-    - ./scripts/bootstrap-env-ubuntu.sh
-
-    - yarn install
-
-    # setup ghr
-    - >
-      if [[ ! -e ~/ghr ]]; then
-        curl -L --create-dirs -o ~/ghr/ghr.zip https://github.com/tcnksm/ghr/releases/download/v0.5.0/ghr_v0.5.0_linux_amd64.zip;
-        unzip ~/ghr/ghr.zip -d ~/ghr
-      fi
-    - sudo ln -sF  ~/ghr/ghr /usr/local/bin/ghr
-
 test:
   override:
-    - node -v
-    - >
-      if [ "$CIRCLE_BRANCH" == 'master' ]; then
-        ./scripts/set-dev-version.js
-      fi;
-    - yarn lint
-    - yarn test-ci -- -- --maxWorkers 3
-    - yarn check-lockfile
-    - yarn build-dist
-    - node ./scripts/build-webpack.js
-    - ./scripts/build-deb.sh
+    - mkdir -p artifacts
+    - echo "hello" > artifacts/foo.txt
 
 deployment:
   release:
-    tag: /v[0-9]+(\.[0-9]+)*/
-    owner: yarnpkg
+    branch: hook-test
     commands:
-      - ~/ghr/ghr -prerelease --username yarnpkg --repository yarn --token $KPM_CIRCLE_RELEASE_TOKEN v$(dist/bin/yarn --version) artifacts/
-      - curl https://nightly.yarnpkg.com/sign_releases?token=$SIGN_TOKEN
-      - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-      - ./scripts/set-installation-method.js "`pwd`/package.json" npm
-      - npm publish --tag rc
-
-notify:
-  webhooks:
-    - url: https://nightly.yarnpkg.com/api/archive_circleci
+      - curl "https://yarndev.dan.cx/test/ci-test.php?id=$CIRCLE_BUILD_NUM"
